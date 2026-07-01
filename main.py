@@ -42,12 +42,12 @@ def extract_audio(video_path, audio_path="temp_audio.mp3"):
     clip.audio.write_audiofile(audio_path)
     return audio_path
 
-def translate_text(text, target_language, api_key=None, provider="openai", ollama_model="llama3"):
+def translate_text(text, target_language, api_key=None, provider="openai", ollama_model="llama3", ollama_server="http://localhost:11434"):
     if provider == "openai":
         return translate_with_openai(text, target_language, api_key)
     elif provider == "ollama":
-        result = translate_with_ollama(text, target_language, model=ollama_model)
-        return verify_or_retranslate_ollama(text, result, target_language, model=ollama_model)
+        result = translate_with_ollama(text, target_language, model=ollama_model, server=ollama_server)
+        return verify_or_retranslate_ollama(text, result, target_language, model=ollama_model, server=ollama_server)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -73,7 +73,7 @@ def translate_with_openai(text, target_language, api_key):
     )
     return response.choices[0].message.content.strip()
 
-def translate_with_ollama(text, target_language, model="llama3"):
+def translate_with_ollama(text, target_language, model="llama3", server="http://localhost:11434"):
     prompt = (
         f"You are a highly accurate and reliable AI translator. "
         f"Your task is to translate the following English sentence into **{target_language}**.\n\n"
@@ -94,7 +94,7 @@ def translate_with_ollama(text, target_language, model="llama3"):
         f"Output ({target_language} only):"
     )
     response = requests.post(
-        "http://localhost:11434/api/generate",
+        f"{server}/api/generate",
         json={"model": model, "prompt": prompt, "stream": False}
     )
     response.raise_for_status()
@@ -106,6 +106,7 @@ def process_single_video(video_path, srt_path, config, parent_bar=None):
     api_key = config.get("api_key")
     provider = config.get("provider", "openai")
     ollama_model = config.get("ollama_model", "llama3")
+    ollama_server = config.get("ollama_server", "http://localhost:11434")
     chunk_duration_sec = config.get("chunk_duration_sec", 60)
     chunk_overlap_sec = config.get("chunk_overlap_sec", 5)
 
@@ -158,7 +159,7 @@ def process_single_video(video_path, srt_path, config, parent_bar=None):
 
                     try:
                         content = (
-                            translate_text(english, language, api_key, provider, ollama_model)
+                            translate_text(english, language, api_key, provider, ollama_model, ollama_server)
                             if translate else english
                         )
                     except Exception as e:
@@ -194,7 +195,7 @@ def process_video_directory(directory_path, config):
             process_single_video(video_path, srt_path, config, parent_bar=video_bar)
             video_bar.update(1)
 
-def verify_or_retranslate_ollama(original_english, translated_text, target_language, model="llama3", max_retries=10):
+def verify_or_retranslate_ollama(original_english, translated_text, target_language, model="llama3", max_retries=10, server="http://localhost:11434"):
     """Verifies if translation is in the correct script and retries if not."""
     verify_prompt = (
         f"You are a linguistic verification assistant.\n"
@@ -205,7 +206,7 @@ def verify_or_retranslate_ollama(original_english, translated_text, target_langu
     for attempt in range(max_retries + 1):
         try:
             response = requests.post(
-                "http://localhost:11434/api/generate",
+                f"{server}/api/generate",
                 json={"model": model, "prompt": verify_prompt, "stream": False}
             )
             response.raise_for_status()
@@ -215,7 +216,7 @@ def verify_or_retranslate_ollama(original_english, translated_text, target_langu
                 return translated_text
             else:
                 logger.warning(f"[Verify Attempt {attempt + 1}] Invalid result. Retrying translation...")
-                translated_text = translate_with_ollama(original_english, target_language, model=model)
+                translated_text = translate_with_ollama(original_english, target_language, model=model, server=server)
         except Exception as e:
             logger.error(f"Verification error: {e}")
             break

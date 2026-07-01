@@ -1,28 +1,34 @@
   {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "required": ["translate", "target_language", "api_key"],
-  "properties": {
-    "translate": {
-      "type": "boolean"
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": [
+      "translate",
+      "target_language"
+    ],
+    "properties": {
+      "translate": {
+        "type": "boolean"
+      },
+      "ollama_model": {
+        "type": "string"
+      },
+      "target_language": {
+        "type": "string",
+        "minLength": 1
+      },
+      "api_key": {
+        "type": "string"
+      },
+      "provider": {
+        "type": "string",
+        "enum": [
+          "openai",
+          "ollama"
+        ]
+      },
+      "ollama_server": {
+        "type": "string"
+      }
     },
-    "ollama_model": {
-      "type": "string"
-    },
-    "target_language": {
-      "type": "string",
-      "minLength": 1
-    },
-    "api_key": {
-      "type": "string"
-    },
-    "provider": {
-      "type": "string",
-      "enum": ["openai", "ollama"]
-    },
-    "ollama_model": {
-      "type": "string"
-    }    
-  },
-  "additionalProperties": false
-}
+    "additionalProperties": false
+  }
