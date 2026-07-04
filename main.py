@@ -144,7 +144,6 @@ def translate_with_ollama(
             "   - $SOURCE_LANG words or phrases\n"
             "   - Commentary, notes, or metadata\n"
             "   - The original $SOURCE_LANG sentence\n"
-            "   - Any newlines or other control characters\n"
             "3. The output MUST be clear, fluent, and natural to a native speaker of $TARGET_LANG.\n"
             "4. Your highest priority is accuracy and clarity for native speakers.\n"
             "5. ✅ After translating, **you MUST internally verify** that the output contains only $TARGET_LANG script, punctuation, or peoples names and contains NO $SOURCE_LANG, romanization, or foreign words.\n"
@@ -183,16 +182,24 @@ def process_single_video(
 ):  # pylint: disable=too-many-locals,too-many-statements
     translate = config.get("translate", False)
     target_language = config.get("target_language", "english")
-    source_language = config.get("source_language", "thai")
+    source_language = config.get("source_language", None)
     api_key = config.get("api_key")
     provider = config.get("provider", "openai")
     ollama_model = config.get("ollama_model", "translategemma:4b-it-q4_K_M")
     ollama_server = config.get("ollama_server", "http://localhost:11434")
     chunk_duration_sec = config.get("chunk_duration_sec", 60)
     chunk_overlap_sec = config.get("chunk_overlap_sec", 5)
+    whisper_model_name = config.get("whisper_model", "base")
 
     if srt_path is None:
         srt_path = f"{os.path.splitext(video_path)[0]}.{get_language_code(target_language)}.srt"
+
+    logger.info("loading whisper model %s", whisper_model_name)
+    try:
+        whisper_model = whisper.load_model(whisper_model_name)
+    except Exception as e:
+        logger.error("❌ Failed to load whisper model %s: %s", whisper_model_name, e)
+        return
 
     logger.info("Starting subtitle generation... %s", srt_path)
 
@@ -222,8 +229,7 @@ def process_single_video(
             chunk.export(chunk_file, format="mp3")
 
             try:
-                model = whisper.load_model("base")
-                result = model.transcribe(chunk_file, language="en")
+                result = whisper_model.transcribe(chunk_file, language=source_language)
             except Exception as e:
                 logger.error("❌ Failed to transcribe chunk %s: %s", i, e)
                 chunk_bar.update(1)
@@ -238,7 +244,7 @@ def process_single_video(
             ) as segment_bar:
 
                 for segment in segments:
-                    english = segment["text"].strip()
+                    content = english = segment["text"].strip()
                     if english == last_english:
                         segment_bar.update(1)
                         continue
@@ -247,9 +253,9 @@ def process_single_video(
                     start = timedelta(seconds=offset + segment["start"])
                     end = timedelta(seconds=offset + segment["end"])
 
-                    try:
-                        content = (
-                            translate_text(
+                    if translate:
+                        try:
+                            content = translate_text(
                                 english,
                                 source_language,
                                 target_language,
@@ -258,12 +264,9 @@ def process_single_video(
                                 ollama_model,
                                 ollama_server,
                             )
-                            if translate
-                            else english
-                        )
-                    except Exception as e:
-                        content = "[Translation error]"
-                        logger.error("[Chunk %d] Translation error: %s", i, e)
+                        except Exception as e:
+                            content = "[Translation error]"
+                            logger.error("[Chunk %d] Translation error: %s", i, e)
 
                     subtitle = srt.Subtitle(
                         index=srt_index, start=start, end=end, content=content
