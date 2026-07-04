@@ -9,14 +9,14 @@ import jsonschema
 import pycountry
 import requests
 import srt
-import whisper
+from faster_whisper import WhisperModel
 from moviepy import VideoFileClip
 from openai import OpenAI
-from pydub import AudioSegment
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 logging.basicConfig(
+    # TODO - make logging level and file configurable, i think with --log-leve
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] %(message)s",
     handlers=[logging.FileHandler("pysub.log"), logging.StreamHandler()],
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Suppress OpenAI client HTTP logs
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 
 
 def get_language_code(language_name):
@@ -52,6 +53,7 @@ def load_config(config_path):
 def extract_audio(video_path, audio_path="temp_audio.mp3"):
     clip = VideoFileClip(video_path)
     clip.audio.write_audiofile(audio_path)
+    clip.close()
     return audio_path
 
 
@@ -187,119 +189,78 @@ def process_single_video(
     provider = config.get("provider", "openai")
     ollama_model = config.get("ollama_model", "translategemma:4b-it-q4_K_M")
     ollama_server = config.get("ollama_server", "http://localhost:11434")
-    chunk_duration_sec = config.get("chunk_duration_sec", 60)
-    chunk_overlap_sec = config.get("chunk_overlap_sec", 5)
     whisper_model_name = config.get("whisper_model", "base")
 
     if srt_path is None:
         srt_path = f"{os.path.splitext(video_path)[0]}.{get_language_code(target_language)}.srt"
 
-    logger.info("loading whisper model %s", whisper_model_name)
-    try:
-        whisper_model = whisper.load_model(whisper_model_name)
-    except Exception as e:
-        logger.error("❌ Failed to load whisper model %s: %s", whisper_model_name, e)
-        return
-
     logger.info("Starting subtitle generation... %s", srt_path)
 
+    logger.info("loading whisper model %s", whisper_model_name)
+    whisper_model = WhisperModel(
+        whisper_model_name, device="cuda", compute_type="float16"
+    )
+
     audio_path = extract_audio(video_path)
-    audio = AudioSegment.from_file(audio_path)
-    chunk_len = chunk_duration_sec * 1000
-    overlap = chunk_overlap_sec * 1000
-    chunks = [
-        audio[i : i + chunk_len] for i in range(0, len(audio), chunk_len - overlap)
-    ]
 
     srt_index = 1
     last_english = None
-    offset = 0.0
 
-    with (
-        open(srt_path, "w", encoding="utf-8") as srt_file,
-        tqdm(
-            total=len(chunks),
-            desc=f"Chunks [{os.path.basename(video_path)}]",
+    with (open(srt_path, "w", encoding="utf-8") as srt_file,):
+        # TODO - this audio could just be binaryio, so no writing to disk
+        segments, info = whisper_model.transcribe(
+            audio_path,
+            language=(get_language_code(source_language) if source_language else None),
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+        )
+
+        if source_language is None:
+            source_language = info.language
+
+        last_end_time = 0.0
+        with tqdm(
+            total=info.duration,
+            desc="Lines",
+            unit="line",
             position=1,
             leave=False,
-        ) as chunk_bar,
-    ):
-        for i, chunk in enumerate(chunks):
-            chunk_file = f"chunk_{i}.mp3"
-            chunk.export(chunk_file, format="mp3")
+        ) as segment_bar:
 
-            try:
-                result = whisper_model.transcribe(chunk_file, language=source_language)
-            except Exception as e:
-                logger.error("❌ Failed to transcribe chunk %s: %s", i, e)
-                chunk_bar.update(1)
-                continue
+            for segment in segments:
+                content = english = segment.text.strip()
+                if english == last_english:
+                    segment_bar.update(segment.end - last_end_time)
+                    last_end_time = segment.end
+                    continue
+                last_english = english
 
-            segments = result.get("segments", [])
-            with tqdm(
-                total=len(segments),
-                desc=f"Segments [Chunk {i + 1}]",
-                position=2,
-                leave=False,
-            ) as segment_bar:
-
-                for segment in segments:
-                    content = english = segment["text"].strip()
-                    if english == last_english:
-                        segment_bar.update(1)
-                        continue
-                    last_english = english
-
-                    start = timedelta(seconds=offset + segment["start"])
-                    end = timedelta(seconds=offset + segment["end"])
-
-                    if translate:
-                        try:
-                            content = translate_text(
-                                english,
-                                source_language,
-                                target_language,
-                                api_key,
-                                provider,
-                                ollama_model,
-                                ollama_server,
-                            )
-                        except Exception as e:
-                            content = "[Translation error]"
-                            logger.error("[Chunk %d] Translation error: %s", i, e)
-
-                    subtitle = srt.Subtitle(
-                        index=srt_index, start=start, end=end, content=content
+                if translate:
+                    content = translate_text(
+                        english,
+                        source_language,
+                        target_language,
+                        api_key,
+                        provider,
+                        ollama_model,
+                        ollama_server,
                     )
-                    srt_file.write(srt.compose([subtitle]))
-                    srt_index += 1
-                    segment_bar.update(1)
 
-            offset += (chunk_len - overlap) / 1000.0
-            chunk_bar.update(1)
+                start = timedelta(seconds=segment.start)
+                end = timedelta(seconds=segment.end)
 
-            try:
-                os.remove(chunk_file)
-            except Exception:
-                logger.warning("⚠️ Could not remove temp chunk file: %s", chunk_file)
+                subtitle = srt.Subtitle(
+                    index=srt_index,
+                    start=start,
+                    end=end,
+                    content=content.replace("\n", "\\n"),
+                )
+                srt_file.write(srt.compose([subtitle]))
+                srt_index += 1
+                segment_bar.update(segment.end - last_end_time)
+                last_end_time = segment.end
 
     logger.info("✅ Subtitles saved to: %s", srt_path)
-
-
-def process_video_directory(directory_path, config):
-    video_files = [
-        f
-        for f in os.listdir(directory_path)
-        if f.lower().endswith((".mp4", ".mkv", ".avi", ".mov"))
-    ]
-
-    with tqdm(total=len(video_files), desc="Videos", position=0) as video_bar:
-        for filename in video_files:
-            video_path = os.path.join(directory_path, filename)
-            srt_path = os.path.splitext(video_path)[0] + ".srt"
-            logger.info("Processing: %s", video_path)
-            process_single_video(video_path, srt_path, config, parent_bar=video_bar)
-            video_bar.update(1)
 
 
 def verify_or_retranslate_ollama(
@@ -364,6 +325,11 @@ def main():
     parser.add_argument("--config", help="Path to config JSON", required=False)
     args = parser.parse_args()
 
+    ## Lets do
+    ## main.py translate|transcribe video.mp4
+    ## main.py translate --ollama_server http://localhost --target_language spanish video.mp4
+    ## main.py translate --config config.toml spanish video.mp4
+    ## main.py server
     with logging_redirect_tqdm():
         config = load_config(args.config) if args.config else {}
         process_single_video(args.input, args.srt_output, config)
