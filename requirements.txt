@@ -1,8 +1,0 @@
-jsonschema==3.2.0
-moviepy==2.2.1
-openai==1.86.0
-openai_whisper==20250625
-audioop-lts==0.2.2
-Requests==2.32.4
-srt==3.5.3
-tqdm==4.67.1

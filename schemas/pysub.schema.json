@@ -16,6 +16,9 @@
         "type": "string",
         "minLength": 1
       },
+      "source_language": {
+        "type": "string"
+      },
       "api_key": {
         "type": "string"
       },
@@ -28,6 +31,9 @@
       },
       "ollama_server": {
         "type": "string"
+      },
+      "prompt": {
+        "type": "array"
       }
     },
     "additionalProperties": false
