@@ -40,6 +40,20 @@ def get_language_code(language_name):
         return "Language not found"
 
 
+def get_language_name(code):
+    try:
+        lang = (
+            pycountry.languages.get(alpha_2=code)
+            or pycountry.languages.get(alpha_3=code)
+            or pycountry.languages.get(name=code)
+        )
+        if lang is None:
+            raise LookupError(f"Language code '{code}' not found.")
+        return lang.name.lower()
+    except LookupError:
+        return "Language not found"
+
+
 def extract_audio(video_path, audio_path="temp_audio.mp3"):
     clip = VideoFileClip(video_path)
     clip.audio.write_audiofile(audio_path)
@@ -71,7 +85,7 @@ def translate_text(
                 "Server must be specified for Ollama translation verification."
             )
 
-        result = translate_with_ollama(
+        return translate_with_ollama(
             text,
             source_language,
             target_language,
@@ -79,16 +93,6 @@ def translate_text(
             server=ollama_server,
             prompt=prompt,
         )
-        return result
-        # return verify_or_retranslate_ollama(
-        #     text,
-        #     result,
-        #     source_language,
-        #     target_language,
-        #     model=ollama_model,
-        #     server=ollama_server,
-        #     prompt=prompt,
-        # )
 
     raise ValueError(f"Unsupported provider: {provider}")
 
@@ -206,7 +210,7 @@ def process_single_video(
         )
 
         if source_language is None:
-            source_language = info.language
+            source_language = get_language_name(info.language)
 
         last_end_time = 0.0
         with tqdm(
@@ -225,7 +229,7 @@ def process_single_video(
                     continue
                 last_english = english
 
-                if source_language != target_language:
+                if source_language.lower() != target_language.lower():
                     content = translate_text(
                         english,
                         source_language,
