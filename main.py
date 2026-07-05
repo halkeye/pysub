@@ -15,12 +15,6 @@ from secret_type import secret
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-logging.basicConfig(
-    # TODO - make logging level and file configurable, i think with --log-leve
-    level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("pysub.log"), logging.StreamHandler()],
-)
 logger = logging.getLogger(__name__)
 
 # Suppress OpenAI client HTTP logs
@@ -306,6 +300,13 @@ def main():
         "--whisper_model",
         help="Whisper model to use for transcription",
         default="large-v2",
+    )
+
+    logging.basicConfig(
+        # TODO - make logging level and file configurable, i think with --log-leve
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler("pysub.log"), logging.StreamHandler()],
     )
 
     args = p.parse_args()
