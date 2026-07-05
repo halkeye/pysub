@@ -1,11 +1,10 @@
-import argparse
-import json
 import logging
 import os
 from datetime import timedelta
 from string import Template
 
-import jsonschema
+import configargparse
+import platformdirs
 import pycountry
 import requests
 import srt
@@ -38,16 +37,6 @@ def get_language_code(language_name):
         return lang.alpha_2 if hasattr(lang, "alpha_2") else lang.alpha_3
     except LookupError:
         return "Language not found"
-
-
-def load_config(config_path):
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    schema_path = os.path.join(os.path.dirname(__file__), "schemas/pysub.schema.json")
-    with open(schema_path, "r", encoding="utf-8") as f:
-        schema = json.load(f)
-    jsonschema.validate(instance=config, schema=schema)
-    return config
 
 
 def extract_audio(video_path, audio_path="temp_audio.mp3"):
@@ -180,35 +169,35 @@ def translate_with_ollama(
 
 
 def process_single_video(
-    video_path, srt_path, config, parent_bar=None
+    video_path,
+    srt_path,
+    target_language=None,
+    source_language=None,
+    api_key=None,
+    provider=None,
+    model=None,
+    server=None,
+    whisper_model=None,
 ):  # pylint: disable=too-many-locals,too-many-statements
-    translate = config.get("translate", False)
-    target_language = config.get("target_language", "english")
-    source_language = config.get("source_language", None)
-    api_key = config.get("api_key")
-    provider = config.get("provider", "openai")
-    ollama_model = config.get("ollama_model", "translategemma:4b-it-q4_K_M")
-    ollama_server = config.get("ollama_server", "http://localhost:11434")
-    whisper_model_name = config.get("whisper_model", "base")
 
     if srt_path is None:
         srt_path = f"{os.path.splitext(video_path)[0]}.{get_language_code(target_language)}.srt"
 
     logger.info("Starting subtitle generation... %s", srt_path)
 
-    logger.info("loading whisper model %s", whisper_model_name)
-    whisper_model = WhisperModel(
-        whisper_model_name, device="cuda", compute_type="float16"
-    )
+    logger.info("loading whisper model %s", whisper_model)
 
     audio_path = extract_audio(video_path)
 
     srt_index = 1
     last_english = None
 
+    whisper_model_object = WhisperModel(
+        whisper_model, device="cuda", compute_type="float16"
+    )
     with (open(srt_path, "w", encoding="utf-8") as srt_file,):
         # TODO - this audio could just be binaryio, so no writing to disk
-        segments, info = whisper_model.transcribe(
+        segments, info = whisper_model_object.transcribe(
             audio_path,
             language=(get_language_code(source_language) if source_language else None),
             vad_filter=True,
@@ -235,15 +224,15 @@ def process_single_video(
                     continue
                 last_english = english
 
-                if translate:
+                if source_language != target_language:
                     content = translate_text(
                         english,
                         source_language,
                         target_language,
                         api_key,
                         provider,
-                        ollama_model,
-                        ollama_server,
+                        ollama_model=model,
+                        ollama_server=server,
                     )
 
                 start = timedelta(seconds=segment.start)
@@ -263,76 +252,75 @@ def process_single_video(
     logger.info("✅ Subtitles saved to: %s", srt_path)
 
 
-def verify_or_retranslate_ollama(
-    original_english,
-    translated_text,
-    source_language,
-    target_language,
-    model="translategemma:4b-it-q4_K_M",
-    max_retries=10,
-    server="http://localhost:11434",
-    prompt=None,
-):
-    """Verifies if translation is in the correct script and retries if not."""
-
-    if model is None:
-        raise ValueError("Model must be specified for Ollama translation verification.")
-
-    verify_prompt = (
-        f"You are a linguistic verification assistant.\n"
-        f"Verify if the following sentence is entirely in {target_language} script, punctuation, or peoples names and contains no {source_language}, romanization, or foreign words.\n"
-        f"Respond with YES if it is valid {target_language}. If it contains any incorrect elements, respond with NO, followed by two new lines, and details about why its incorrect.\n\n"
-        f"---\nSentence:\n{translated_text}\n\nAnswer:"
-    )
-    for attempt in range(max_retries + 1):
-        try:
-            response = requests.post(
-                f"{server}/api/generate",
-                json={"model": model, "prompt": verify_prompt, "stream": False},
-            )
-            response.raise_for_status()
-            answer = response.json()["response"].strip().lower()
-            if "yes" in answer:
-                return translated_text
-
-            logger.info(
-                "[Verify Attempt %d] Verifying '%s' gave invalid result of '%s' Retrying translation...",
-                attempt + 1,
-                translated_text,
-                answer,
-            )
-
-            translated_text = translate_with_ollama(
-                original_english,
-                source_language,
-                target_language,
-                model=model,
-                server=server,
-                prompt=prompt,
-            )
-        except Exception as e:
-            logger.error("Verification error: %s", e)
-            break
-    return f"[Translation verification failed] - {original_english}"
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Generate subtitles from video(s).")
-    parser.add_argument("input", help="Path to a video file or directory")
-    parser.add_argument(
-        "--srt_output", help="Path to save .srt output or directory", required=False
+    p = configargparse.ArgParser(
+        description="Generate subtitles from video(s).",
+        config_file_parser_class=configargparse.TomlConfigParser(["pysub"]),
+        default_config_files=[
+            platformdirs.user_config_path("pysub") / "config.toml",
+        ],
     )
-    parser.add_argument("--config", help="Path to config JSON", required=False)
-    args = parser.parse_args()
 
-    ## Lets do
-    ## main.py translate|transcribe video.mp4
-    ## main.py translate --ollama_server http://localhost --target_language spanish video.mp4
-    ## main.py translate --config config.toml spanish video.mp4
-    ## main.py server
-    with logging_redirect_tqdm():
-        config = load_config(args.config) if args.config else {}
-        process_single_video(args.input, args.srt_output, config)
+    p.add_argument("--config", is_config_file=True, help="config file path")
+
+    p.add_argument("input", help="Path to a video file or directory")
+    p.add_argument(
+        "--srt_filename",
+        help="SRT Filename (default will be video.lang.srt)",
+    )
+    p.add_argument(
+        "--source_language",
+        help="Source language for translation",
+    )
+    p.add_argument(
+        "--target_language",
+        help="Target language for translation",
+        default="english",
+    )
+    p.add_argument(
+        "--api_key",
+        help="API key for translation service",
+    )
+    p.add_argument(
+        "--provider",
+        help="Translation provider (openai or ollama)",
+        default="ollama",
+    )
+    p.add_argument(
+        "--model",
+        help="Model for translation",
+        default="translategemma:4b-it-q4_K_M",
+    )
+    p.add_argument(
+        "--server",
+        help="Server for Ollama translation",
+        default="http://localhost:11434",
+    )
+    p.add_argument(
+        "--whisper_model",
+        help="Whisper model to use for transcription",
+        default="large-v2",
+    )
+
+    args = p.parse_args()
+    print(p.format_values())
+
+    if args.input == "server":
+        raise ValueError("unimplemented")
+    else:
+        with logging_redirect_tqdm():
+            logger.info("Config: %s", args)
+            process_single_video(
+                args.input,
+                args.srt_filename,
+                target_language=args.target_language,
+                source_language=args.source_language,
+                api_key=args.api_key,
+                provider=args.provider,
+                model=args.model,
+                server=args.server,
+                whisper_model=args.whisper_model,
+            )
 
 
 if __name__ == "__main__":
