@@ -60,6 +60,7 @@ dependencies = [
     "python-dotenv==1.2.2",
     "regex==2026.6.28",
     "requests==2.32.4",
+    "secret-type>=0.3.0",
     "setuptools==82.0.1",
     "six==1.17.0",
     "sniffio==1.3.1",

@@ -11,6 +11,7 @@ import srt
 from faster_whisper import WhisperModel
 from moviepy import VideoFileClip
 from openai import OpenAI
+from secret_type import secret
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -279,6 +280,7 @@ def main():
     )
     p.add_argument(
         "--api_key",
+        type=secret,
         help="API key for translation service",
     )
     p.add_argument(
@@ -303,9 +305,9 @@ def main():
     )
 
     args = p.parse_args()
-    print(p.format_values())
 
     if args.input == "server":
+        logger.info("Config: %s", args)
         raise ValueError("unimplemented")
     else:
         with logging_redirect_tqdm():
