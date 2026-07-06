@@ -9,6 +9,7 @@ import platformdirs
 import pycountry
 import requests
 import srt
+import webvtt
 from faster_whisper import WhisperModel
 from moviepy import VideoFileClip
 from openai import OpenAI
@@ -30,6 +31,40 @@ class TranslationProvider(Enum):
     OLLAMA = "ollama"
     OPENAI = "openai"
     WHISPER = "whisper"
+
+
+class SubtitleType(Enum):
+    """Which subtitle type."""
+
+    VTT = "vtt"
+    SRT = "srt"
+
+
+def format_vtt_timestamp(delta):
+    """Format a timedelta as HH:MM:SS.mmm, always including milliseconds.
+
+    webvtt.models.Timestamp.PATTERN requires a literal '.' followed by
+    digits, but str(timedelta) omits the fraction entirely when there are
+    no microseconds (e.g. "0:00:24" instead of "0:00:24.000000").
+    """
+    total_ms = round(delta.total_seconds() * 1000)
+    hours, remainder_ms = divmod(total_ms, 3_600_000)
+    minutes, remainder_ms = divmod(remainder_ms, 60_000)
+    seconds, milliseconds = divmod(remainder_ms, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def build_srt_filename(subtitle_template, subtitle_type, video_path, target_language):
+    return Template(subtitle_template).safe_substitute(
+        {
+            "VIDEO_DIRECTORY": os.path.dirname(video_path) or ".",
+            "VIDEO_NAME": os.path.splitext(video_path)[0],
+            "VIDEO_EXTENSION": os.path.splitext(video_path)[1],
+            "LANGUAGE_NAME": target_language,
+            "LANGUAGE_CODE": get_language_code(target_language),
+            "SUBTITLE_EXTENSION": subtitle_type.value,
+        }
+    )
 
 
 def get_language_code(language_name):
@@ -178,7 +213,8 @@ def translate_with_ollama(
 
 def process_single_video(
     video_path,
-    srt_path,
+    subtitle_path=None,
+    subtitle_type=None,
     target_language=None,
     source_language=None,
     api_key=None,
@@ -191,6 +227,8 @@ def process_single_video(
     logger.info("loading whisper model %s", whisper_model)
 
     srt_index = 1
+    if subtitle_type == SubtitleType.VTT:
+        vtt = webvtt.WebVTT()
     last_english = None
 
     whisper_model_object = WhisperModel(
@@ -214,11 +252,13 @@ def process_single_video(
     if source_language is None:
         source_language = get_language_name(info.language)
 
-    srt_path = build_srt_filename(srt_path, video_path, target_language)
+    subtitle_path = build_srt_filename(
+        subtitle_path, subtitle_type, video_path, target_language
+    )
 
-    logger.info("Starting subtitle generation... %s", srt_path)
+    logger.info("Starting subtitle generation... %s", subtitle_path)
 
-    with open(srt_path, "w", encoding="utf-8") as srt_file:
+    with open(subtitle_path, "w", encoding="utf-8") as srt_file:
         last_end_time = 0.0
 
         with tqdm(
@@ -252,18 +292,29 @@ def process_single_video(
                 start = timedelta(seconds=segment.start)
                 end = timedelta(seconds=segment.end)
 
-                subtitle = srt.Subtitle(
-                    index=srt_index,
-                    start=start,
-                    end=end,
-                    content=content.replace("\n", "\\n"),
-                )
-                srt_file.write(srt.compose([subtitle]))
-                srt_index += 1
+                if subtitle_type == SubtitleType.SRT:
+                    subtitle = srt.Subtitle(
+                        index=srt_index,
+                        start=start,
+                        end=end,
+                        content=content.replace("\n", "\\n"),
+                    )
+                    srt_file.write(srt.compose([subtitle]))
+                    srt_index += 1
+                elif subtitle_type == SubtitleType.VTT:
+                    vtt.captions.append(
+                        webvtt.Caption(
+                            start=format_vtt_timestamp(start),
+                            end=format_vtt_timestamp(end),
+                            text=content.split("\n"),
+                        )
+                    )
                 segment_bar.update(segment.end - last_end_time)
                 last_end_time = segment.end
 
-    logger.info("✅ Subtitles saved to: %s", srt_path)
+    if subtitle_type == SubtitleType.VTT:
+        vtt.save(subtitle_path)
+    logger.info("✅ Subtitles saved to: %s", subtitle_path)
 
 
 def main():
@@ -280,8 +331,14 @@ def main():
     p.add_argument("input", help="Path to a video file or directory")
     p.add_argument(
         "--srt_filename",
-        default="$VIDEO_DIRECTORY/$VIDEO_NAME.$LANGUAGE_CODE.srt",
+        default="$VIDEO_DIRECTORY/$VIDEO_NAME.$LANGUAGE_CODE.$SUBTITLE_EXTENSION",
         help="SRT Filename (default will be video.lang.srt)",
+    )
+    p.add_argument(
+        "--subtitle_type",
+        help="Subtitle type",
+        type=SubtitleType,
+        choices=list(SubtitleType),
     )
     p.add_argument(
         "--source_language",
@@ -342,7 +399,8 @@ def main():
             logger.info("Config: %s", args)
             process_single_video(
                 args.input,
-                args.srt_filename,
+                subtitle_path=args.srt_filename,
+                subtitle_type=args.subtitle_type,
                 target_language=args.target_language,
                 source_language=args.source_language,
                 api_key=args.api_key,
@@ -351,18 +409,6 @@ def main():
                 server=args.server,
                 whisper_model=args.whisper_model,
             )
-
-
-def build_srt_filename(srt_path, video_path, target_language):
-    return Template(srt_path).safe_substitute(
-        {
-            "VIDEO_DIRECTORY": os.path.dirname(video_path) or ".",
-            "VIDEO_NAME": os.path.splitext(video_path)[0],
-            "VIDEO_EXTENSION": os.path.splitext(video_path)[1],
-            "LANGUAGE_NAME": target_language,
-            "LANGUAGE_CODE": get_language_code(target_language),
-        }
-    )
 
 
 if __name__ == "__main__":
