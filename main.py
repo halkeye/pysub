@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import timedelta
+from enum import Enum
 from string import Template
 
 import configargparse
@@ -21,6 +22,14 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+
+
+class TranslationProvider(Enum):
+    """Which translation provider to use for translation."""
+
+    OLLAMA = "ollama"
+    OPENAI = "openai"
+    WHISPER = "whisper"
 
 
 def get_language_code(language_name):
@@ -65,10 +74,10 @@ def translate_text(
     ollama_server=None,
     prompt=None,
 ):
-    if provider == "openai":
+    if provider == TranslationProvider.OPENAI:
         return translate_with_openai(text, source_language, target_language, api_key)
 
-    if provider == "ollama":
+    if provider == TranslationProvider.OLLAMA:
         if ollama_model is None:
             raise ValueError(
                 "Model must be specified for Ollama translation verification."
@@ -195,6 +204,7 @@ def process_single_video(
     # TODO - this audio could just be binaryio, so no writing to disk
     segments, info = whisper_model_object.transcribe(
         audio_path,
+        task="translate" if provider == TranslationProvider.WHISPER else "transcribe",
         language=(get_language_code(source_language) if source_language else None),
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
@@ -225,8 +235,9 @@ def process_single_video(
                     last_end_time = segment.end
                     continue
                 last_english = english
-
-                if source_language.lower() != target_language.lower():
+                if provider == TranslationProvider.WHISPER:
+                    content = segment.text.strip()
+                elif source_language.lower() != target_language.lower():
                     content = translate_text(
                         english,
                         source_language,
@@ -288,6 +299,8 @@ def main():
     p.add_argument(
         "--provider",
         help="Translation provider (openai or ollama)",
+        type=TranslationProvider,
+        choices=list(TranslationProvider),
         default="ollama",
     )
     p.add_argument(
