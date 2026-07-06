@@ -190,8 +190,6 @@ def process_single_video(
 
     logger.info("loading whisper model %s", whisper_model)
 
-    audio_path = extract_audio(video_path)
-
     srt_index = 1
     last_english = None
 
@@ -201,7 +199,10 @@ def process_single_video(
 
     logger.info("starting reading audio file")
 
-    # TODO - this audio could just be binaryio, so no writing to disk
+    audio_path = extract_audio(video_path)
+
+    logger.info("transcribing audio file")
+
     segments, info = whisper_model_object.transcribe(
         audio_path,
         task="translate" if provider == TranslationProvider.WHISPER else "transcribe",
