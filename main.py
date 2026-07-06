@@ -179,11 +179,6 @@ def process_single_video(
     whisper_model=None,
 ):  # pylint: disable=too-many-locals,too-many-statements
 
-    if srt_path is None:
-        srt_path = f"{os.path.splitext(video_path)[0]}.{get_language_code(target_language)}.srt"
-
-    logger.info("Starting subtitle generation... %s", srt_path)
-
     logger.info("loading whisper model %s", whisper_model)
 
     audio_path = extract_audio(video_path)
@@ -194,19 +189,27 @@ def process_single_video(
     whisper_model_object = WhisperModel(
         whisper_model, device="cuda", compute_type="float16"
     )
-    with (open(srt_path, "w", encoding="utf-8") as srt_file,):
-        # TODO - this audio could just be binaryio, so no writing to disk
-        segments, info = whisper_model_object.transcribe(
-            audio_path,
-            language=(get_language_code(source_language) if source_language else None),
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 500},
-        )
 
-        if source_language is None:
-            source_language = get_language_name(info.language)
+    logger.info("starting reading audio file")
 
+    # TODO - this audio could just be binaryio, so no writing to disk
+    segments, info = whisper_model_object.transcribe(
+        audio_path,
+        language=(get_language_code(source_language) if source_language else None),
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
+    )
+
+    if source_language is None:
+        source_language = get_language_name(info.language)
+
+    srt_path = build_srt_filename(srt_path, video_path, target_language)
+
+    logger.info("Starting subtitle generation... %s", srt_path)
+
+    with open(srt_path, "w", encoding="utf-8") as srt_file:
         last_end_time = 0.0
+
         with tqdm(
             total=info.duration,
             desc="Lines",
@@ -265,6 +268,7 @@ def main():
     p.add_argument("input", help="Path to a video file or directory")
     p.add_argument(
         "--srt_filename",
+        default="$VIDEO_DIRECTORY/$VIDEO_NAME.$LANGUAGE_CODE.srt",
         help="SRT Filename (default will be video.lang.srt)",
     )
     p.add_argument(
@@ -328,6 +332,18 @@ def main():
                 server=args.server,
                 whisper_model=args.whisper_model,
             )
+
+
+def build_srt_filename(srt_path, video_path, target_language):
+    return Template(srt_path).safe_substitute(
+        {
+            "VIDEO_DIRECTORY": os.path.dirname(video_path) or ".",
+            "VIDEO_NAME": os.path.splitext(video_path)[0],
+            "VIDEO_EXTENSION": os.path.splitext(video_path)[1],
+            "LANGUAGE_NAME": target_language,
+            "LANGUAGE_CODE": get_language_code(target_language),
+        }
+    )
 
 
 if __name__ == "__main__":
