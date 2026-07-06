@@ -305,15 +305,20 @@ def main():
         help="Whisper model to use for transcription",
         default="large-v2",
     )
-
-    logging.basicConfig(
-        # TODO - make logging level and file configurable, i think with --log-leve
-        level=logging.INFO,
-        format="[%(asctime)s] [%(levelname)s] %(message)s",
-        handlers=[logging.FileHandler("pysub.log"), logging.StreamHandler()],
+    p.add_argument(
+        "-log",
+        "--loglevel",
+        help="Provide logging level. Example --loglevel debug",
+        default="info",
     )
 
     args = p.parse_args()
+
+    logging.basicConfig(
+        level=args.loglevel.upper(),
+        format="[%(asctime)s] [%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler("pysub.log"), logging.StreamHandler()],
+    )
 
     if args.input == "server":
         logger.info("Config: %s", args)
