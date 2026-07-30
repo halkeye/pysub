@@ -1,0 +1,70 @@
+"""Subtitle formatting and file generation utilities."""
+
+import logging
+import os
+from datetime import timedelta
+from string import Template
+
+from pysub.config import SubtitleType
+from pysub.language import get_language_code
+
+logger = logging.getLogger(__name__)
+
+
+def format_vtt_timestamp(delta: timedelta) -> str:
+    """Format a timedelta as HH:MM:SS.mmm for VTT format.
+
+    webvtt.models.Timestamp.PATTERN requires a literal '.' followed by
+    digits, but str(timedelta) omits the fraction entirely when there are
+    no microseconds (e.g. "0:00:24" instead of "0:00:24.000000").
+
+    Args:
+        delta: A timedelta representing the timestamp.
+
+    Returns:
+        Formatted timestamp string in HH:MM:SS.mmm format.
+    """
+    total_ms = round(delta.total_seconds() * 1000)
+    hours, remainder_ms = divmod(total_ms, 3_600_000)
+    minutes, remainder_ms = divmod(remainder_ms, 60_000)
+    seconds, milliseconds = divmod(remainder_ms, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def build_srt_filename(
+    subtitle_template: str,
+    subtitle_type: SubtitleType,
+    video_path: str,
+    target_language: str,
+) -> str:
+    """Build the subtitle filename from a template.
+
+    Args:
+        subtitle_template: Template string with placeholders.
+        subtitle_type: The subtitle format (VTT or SRT).
+        video_path: Path to the source video file.
+        target_language: Target language name for the subtitles.
+
+    Returns:
+        Resolved subtitle filename.
+
+    Template variables:
+        $VIDEO_DIRECTORY: Directory containing the video file.
+        $VIDEO_NAME: Video filename without extension.
+        $VIDEO_EXTENSION: Video file extension.
+        $LANGUAGE_NAME: Target language name.
+        $LANGUAGE_CODE: ISO language code.
+        $SUBTITLE_EXTENSION: Subtitle file extension (vtt or srt).
+    """
+    filename = Template(subtitle_template).safe_substitute(
+        {
+            "VIDEO_DIRECTORY": os.path.dirname(video_path) or ".",
+            "VIDEO_NAME": os.path.splitext(os.path.basename(video_path))[0],
+            "VIDEO_EXTENSION": os.path.splitext(os.path.basename(video_path))[1],
+            "LANGUAGE_NAME": target_language,
+            "LANGUAGE_CODE": get_language_code(target_language),
+            "SUBTITLE_EXTENSION": subtitle_type.value,
+        }
+    )
+    logger.debug("Built subtitle filename: %s", filename)
+    return filename

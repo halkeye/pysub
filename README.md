@@ -56,27 +56,6 @@ All settings are provided via a JSON config file. Here's an example `config.json
 
 ---
 
-## 📦 Dependencies
-
-Install dependencies with:
-
-```bash
-pip install -r requirements.txt
-```
-
-### `requirements.txt`
-
-```
-jsonschema==4.24.0
-moviepy==2.2.1
-openai==1.86.0
-openai_whisper==20240930
-Requests==2.32.4
-srt==3.5.3
-```
-
----
-
 ## 🔧 Local Ollama Setup
 
 If using `provider: "ollama"` in your config:
