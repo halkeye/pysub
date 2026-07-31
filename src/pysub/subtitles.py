@@ -96,7 +96,7 @@ def split_subtitle_by_punctuation(
         single-element list unchanged if no sentence boundary is found.
     """
     sentences = [s for s in _SENTENCE_SPLIT_RE.split(content.strip()) if s]
-    if len(sentences) <= 1:
+    if len(sentences) <= 1 or end - start <= timedelta(0):
         return [(start, end, content)]
 
     total_chars = sum(len(sentence) for sentence in sentences)
