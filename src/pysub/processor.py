@@ -86,6 +86,9 @@ def process_single_video(
         for segment in segments:
             content = original_content = segment.text.strip()
 
+            if not original_content:
+                continue
+
             if config.translation == TranslationProvider.WHISPER:
                 content = segment.text.strip()
             elif source_language.lower() != target_language.lower():
