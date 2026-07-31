@@ -11,6 +11,9 @@ from transformers import (
     AutoModelForTokenClassification,
     AutoProcessor,
 )
+from transformers.models.qwen3_asr.processing_qwen3_asr import (
+    FORCED_ALIGNER_LANGUAGES,
+)
 
 from pysub.transcription.types import TranscriptionInfo, TranscriptionSegment
 
@@ -242,34 +245,47 @@ def transcribe_qwen(
         transcript[:100] + "..." if len(transcript) > 100 else transcript,
     )
 
-    # Step 2: Prepare alignment inputs
-    logger.debug("Running forced alignment")
-    aligner_inputs, word_lists = aligner.processor.prepare_forced_aligner_inputs(
-        audio=os.path.realpath(audio_path),
-        transcript=transcript,
-        language=language,
-    )
-    aligner_inputs = aligner_inputs.to(aligner.model.device, aligner.model.dtype)
+    if language not in FORCED_ALIGNER_LANGUAGES:
+        logger.warning(
+            "Forced aligner does not support %s (supported: %s); "
+            "using whole-chunk timing instead of word-level alignment",
+            language,
+            sorted(FORCED_ALIGNER_LANGUAGES),
+        )
+        segments = [
+            TranscriptionSegment(start=0.0, end=audio_duration_sec, text=transcript)
+        ]
+    else:
+        # Step 2: Prepare alignment inputs
+        logger.debug("Running forced alignment")
+        aligner_inputs, word_lists = aligner.processor.prepare_forced_aligner_inputs(
+            audio=os.path.realpath(audio_path),
+            transcript=transcript,
+            language=language,
+        )
+        aligner_inputs = aligner_inputs.to(aligner.model.device, aligner.model.dtype)
 
-    # Step 3: Run forced aligner
-    with torch.inference_mode():
-        outputs = aligner.model(**aligner_inputs)
+        # Step 3: Run forced aligner
+        with torch.inference_mode():
+            outputs = aligner.model(**aligner_inputs)
 
-    # Step 4: Decode timestamps
-    word_timestamps: list[dict[str, Any]] = aligner.processor.decode_forced_alignment(
-        logits=outputs.logits,
-        input_ids=aligner_inputs["input_ids"],
-        word_lists=word_lists,
-        timestamp_token_id=aligner.model.config.timestamp_token_id,
-    )[0]
+        # Step 4: Decode timestamps
+        word_timestamps: list[dict[str, Any]] = (
+            aligner.processor.decode_forced_alignment(
+                logits=outputs.logits,
+                input_ids=aligner_inputs["input_ids"],
+                word_lists=word_lists,
+                timestamp_token_id=aligner.model.config.timestamp_token_id,
+            )[0]
+        )
 
-    logger.debug("Got %d word timestamps", len(word_timestamps))
+        logger.debug("Got %d word timestamps", len(word_timestamps))
 
-    # Step 5: Convert words to segments based on pauses
-    logger.debug("Segmenting based on pauses")
-    segments = _words_to_sentences(word_timestamps)
+        # Step 5: Convert words to segments based on pauses
+        logger.debug("Segmenting based on pauses")
+        segments = _words_to_sentences(word_timestamps)
 
-    logger.debug("Created %d sentence segments", len(segments))
+        logger.debug("Created %d sentence segments", len(segments))
 
     info = TranscriptionInfo(language=language, duration=audio_duration_sec)
 
