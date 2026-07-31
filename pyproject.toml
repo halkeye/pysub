@@ -34,6 +34,7 @@ dependencies = [
     "more-itertools==11.1.0",
     "moviepy==2.2.1",
     "mpmath==1.3.0",
+    "nagisa>=0.3.0",
     "networkx==3.6.1",
     "numba==0.65.1",
     "numpy==2.4.6",
@@ -52,6 +53,7 @@ dependencies = [
     "setuptools==82.0.1",
     "six==1.17.0",
     "sniffio==1.3.1",
+    "soynlp>=0.0.493",
     "srt==3.5.3",
     "tiktoken==0.13.0",
     "toml>=0.10.2",
@@ -111,6 +113,7 @@ disable_error_code = ["import-not-found", "import-untyped"]
 [dependency-groups]
 dev = [
     "python-lsp-server>=1.14.0",
+    "ty>=0.0.65",
     "types-jsonschema>=4.26.0.20260518",
     "types-pycountry>=24.6.0.20251119",
     "types-requests>=2.33.0.20260518",

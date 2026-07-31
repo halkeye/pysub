@@ -45,6 +45,13 @@ def translate_with_openai(
         ],
     )
 
-    result = response.choices[0].message.content.strip()
-    logger.debug("OpenAI translation result: %s", result[:50] if result else "")
-    return result
+    if (
+        len(response.choices) > 0
+        and response.choices[0].message is not None
+        and response.choices[0].message.content is not None
+    ):
+        result = response.choices[0].message.content.strip()
+        logger.debug("OpenAI translation result: %s", result[:50] if result else "")
+        return result
+
+    return ""

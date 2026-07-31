@@ -51,16 +51,10 @@ def process_single_video(
     # FIXME
     # audio_path = extract_audio(video_path)
     chunks = chunk_audio(config, audio_path)
-    if len(chunks) == 0:
-        logger.warning(
-            "No audio chunks were created. Check the audio file and VAD settings."
-        )
-        return
-    logger.info("Audio file read and chunked into %d chunks", len(chunks))
 
     logger.info("Transcribing audio file")
 
-    subtitle_path = None
+    subtitle_path: str | None = None
 
     for chunk in tqdm(chunks, desc="Chunks", unit="chunk", position=1):
         if config.transcription == TranscriptionProvider.WHISPER:
@@ -89,22 +83,29 @@ def process_single_video(
             logger.info("Starting subtitle generation: %s", subtitle_path)
 
         for segment in segments:
-            content = english = segment.text.strip()
+            content = original_content = segment.text.strip()
 
             if config.translation == TranslationProvider.WHISPER:
                 content = segment.text.strip()
             elif source_language.lower() != target_language.lower():
                 content = translate_text(
-                    english, source_language, target_language, config
+                    original_content, source_language, target_language, config
                 )
 
             start = timedelta(seconds=chunk.start_time + segment.start)
             end = timedelta(seconds=chunk.start_time + segment.end)
 
+            logger.info(
+                "Adding subtitle: %s --> %s | %s = %s",
+                start,
+                end,
+                original_content,
+                content,
+            )
             if subtitle_type == SubtitleType.SRT:
                 subtitles.append(
                     srt.Subtitle(
-                        index=1,
+                        index=len(subtitles) + 1,
                         start=start,
                         end=end,
                         content=content.replace("\n", "\\n"),
@@ -124,13 +125,13 @@ def process_single_video(
                     )
                 )
 
-    if subtitle_type == SubtitleType.SRT:
-        with open(subtitle_path, "w", encoding="utf-8") as subtitle_file:
-            from pprint import pprint
-
-            pprint(subtitles)
-            subtitle_file.write(srt.compose(subtitles))
-    if subtitle_type == SubtitleType.VTT:
-        vtt.save(subtitle_path)
+    if subtitle_path is not None:
+        if subtitle_type == SubtitleType.SRT:
+            with open(file=subtitle_path, mode="w", encoding="utf-8") as subtitle_file:
+                subtitle_file.write(srt.compose(subtitles))
+        elif subtitle_type == SubtitleType.VTT:
+            if vtt is None:
+                raise ValueError("VTT object is not initialized for VTT subtitle type")
+            vtt.save(subtitle_path)
 
     logger.info("Subtitles saved to: %s", subtitle_path)

@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, Generator
 
 import torch
 from moviepy import VideoFileClip
@@ -48,9 +48,9 @@ class ChunkedAudio:
 def chunk_audio(
     config: Config,
     audio_path: str,
-    max_chunk_duration_ms: int = 1 * 60 * 1000,
-    silence_gap_threshold_ms: int = 15 * 1000,
-) -> List[ChunkedAudio]:
+    max_chunk_duration_ms: int = 30 * 1000,
+    silence_gap_threshold_ms: int = 700,
+) -> Generator[ChunkedAudio]:
     """Chunk audio into segments based on speech timestamps.
 
     Chunks are created when either:
@@ -68,7 +68,8 @@ def chunk_audio(
     """
     if config.transcription == TranscriptionProvider.WHISPER:
         audio = AudioSegment.from_file(audio_path)
-        return [ChunkedAudio(0.0, len(audio) / 1000, audio_path)]
+        yield ChunkedAudio(0.0, len(audio) / 1000, audio_path)
+        return
 
     logger.info("loading voice detection model")
     model, utils = torch.hub.load(  # type: ignore[misc]
@@ -84,7 +85,7 @@ def chunk_audio(
 
     if not speech_timestamps:
         logger.warning("No speech detected in audio file: %s", audio_path)
-        return []
+        return
 
     logger.info("converting audio file")
     audio = AudioSegment.from_file(audio_path)
@@ -92,24 +93,22 @@ def chunk_audio(
     logger.info("creating chunks")
     chunks = []
 
-    def save_chunk(start: int, end: int) -> None:
+    def save_chunk(start: int, end: int) -> ChunkedAudio:
         """Save a chunk of audio to a file and add to chunks list."""
         audio_chunk = audio[start:end]
         chunk_filename = (
             f"{config.tmp_dir}/chunk_{start / 1000:.2f}_{end / 1000:.2f}.mp3"
         )
         audio_chunk.export(chunk_filename, format="mp3")
-        chunks.append(ChunkedAudio(start / 1000, end / 1000, chunk_filename))
         logger.debug(
             "Created chunk: %s (duration: %.2fs)", chunk_filename, (end - start) / 1000
         )
+        return ChunkedAudio(start / 1000, end / 1000, chunk_filename)
 
     chunk_start_ms: int | None = None
     last_end_ms: int | None = None
 
-    for speech_timestamp in tqdm(
-        speech_timestamps, desc="Speech Timestamps", position=1
-    ):
+    for speech_timestamp in speech_timestamps:
         current_start_ms = int(speech_timestamp["start"] * 1000)
         current_end_ms = int(speech_timestamp["end"] * 1000)
 
@@ -133,7 +132,7 @@ def chunk_audio(
 
         if should_split and last_end_ms is not None:
             # Save the current chunk up to the last speech segment
-            save_chunk(chunk_start_ms, last_end_ms)
+            yield save_chunk(chunk_start_ms, last_end_ms)
             # Start a new chunk from the current speech segment
             chunk_start_ms = current_start_ms
 
@@ -141,7 +140,6 @@ def chunk_audio(
 
     # Save the final chunk
     if chunk_start_ms is not None and last_end_ms is not None:
-        save_chunk(chunk_start_ms, last_end_ms)
+        yield save_chunk(chunk_start_ms, last_end_ms)
 
     logger.info("Created %d chunks from audio file", len(chunks))
-    return chunks
