@@ -1,6 +1,7 @@
 """Video processing and subtitle generation orchestration."""
 
 import logging
+import os
 from datetime import timedelta
 
 import srt
@@ -19,6 +20,7 @@ from pysub.subtitles import (
     build_srt_filename,
     format_vtt_timestamp,
     pad_subtitle_durations,
+    split_subtitle_by_punctuation,
 )
 from pysub.transcription import transcribe
 from pysub.transcription.qwen import transcribe_qwen
@@ -46,9 +48,9 @@ def process_single_video(
 
     logger.info("Starting to read audio file")
 
-    audio_path = "temp_audio.mp3"
-    # FIXME
-    # audio_path = extract_audio(video_path)
+    audio_path = extract_audio(
+        video_path, audio_path=os.path.join(config.tmp_dir or "./", "temp_audio.mp3")
+    )
     chunks = chunk_audio(config, audio_path)
 
     logger.info("Transcribing audio file")
@@ -101,7 +103,7 @@ def process_single_video(
                 original_content,
                 content,
             )
-            subtitles.append((start, end, content))
+            subtitles.extend(split_subtitle_by_punctuation(start, end, content))
 
     subtitles = pad_subtitle_durations(
         subtitles, timedelta(seconds=config.min_subtitle_duration_seconds)

@@ -48,8 +48,8 @@ class ChunkedAudio:
 def chunk_audio(
     config: Config,
     audio_path: str,
-    max_chunk_duration_ms: int = 30 * 1000,
-    silence_gap_threshold_ms: int = 700,
+    max_chunk_duration_ms: int = 45 * 1000,
+    silence_gap_threshold_ms: int = 1500,
 ) -> Generator[ChunkedAudio]:
     """Chunk audio into segments based on speech timestamps.
 
@@ -60,8 +60,8 @@ def chunk_audio(
     Args:
         config: Application configuration.
         audio_path: Path to the audio file to chunk.
-        max_chunk_duration_ms: Maximum chunk duration in milliseconds (default: 5 minutes).
-        silence_gap_threshold_ms: Silence gap threshold to split chunks (default: 30 seconds).
+        max_chunk_duration_ms: Maximum chunk duration in milliseconds (default: 45 seconds).
+        silence_gap_threshold_ms: Silence gap threshold to split chunks (default: 1.5 seconds).
 
     Returns:
         List of ChunkedAudio objects with start times and file paths.

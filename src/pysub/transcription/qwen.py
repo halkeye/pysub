@@ -228,7 +228,7 @@ def transcribe_qwen(
     inputs = asr.processor.apply_transcription_request(
         audio=os.path.realpath(audio_path)
     ).to(asr.model.device, asr.model.dtype)
-    output_ids = asr.model.generate(**inputs, max_new_tokens=256)
+    output_ids = asr.model.generate(**inputs, max_new_tokens=512)
     generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
     # Parsed output: dict with "language" and "transcription"
     parsed = asr.processor.decode(generated_ids, return_format="parsed")[0]

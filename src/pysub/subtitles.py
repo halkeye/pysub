@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import timedelta
 from string import Template
 
@@ -9,6 +10,19 @@ from pysub.config import SubtitleType
 from pysub.language import get_language_code
 
 logger = logging.getLogger(__name__)
+
+# Sentence-ending punctuation across supported target languages: Latin (.!?),
+# fullwidth CJK (。！？), Devanagari danda/double danda (।॥), and the Arabic
+# question mark (؟). Arabic reuses the Latin "." and "!".
+_SENTENCE_END_CHARS = ".!?。！？।॥؟"
+
+# Split right after a sentence-ending mark, consuming any trailing whitespace
+# (CJK has none). The negative lookahead keeps clustered marks like "..." or
+# "?!" together by refusing to split when another sentence-ending mark
+# follows (possibly after whitespace).
+_SENTENCE_SPLIT_RE = re.compile(
+    rf"(?<=[{_SENTENCE_END_CHARS}])(?!\s*[{_SENTENCE_END_CHARS}])\s*"
+)
 
 
 def format_vtt_timestamp(delta: timedelta) -> str:
@@ -57,6 +71,47 @@ def pad_subtitle_durations(
         if desired_end > end:
             padded[i] = (start, desired_end, content)
     return padded
+
+
+def split_subtitle_by_punctuation(
+    start: timedelta,
+    end: timedelta,
+    content: str,
+) -> list[tuple[timedelta, timedelta, str]]:
+    """Split subtitle content into sentences, distributing time proportionally.
+
+    A transcription segment only carries one start/end pair for its whole
+    text, so once it's split into multiple sentences there's no real timing
+    signal left to place each one precisely. This allocates each sentence a
+    slice of the original range sized by its share of the total character
+    count, which approximates a constant speaking rate across the segment.
+
+    Args:
+        start: Original start time for the whole content.
+        end: Original end time for the whole content.
+        content: The subtitle text, potentially containing multiple sentences.
+
+    Returns:
+        List of (start, end, content) tuples, one per sentence. Returns a
+        single-element list unchanged if no sentence boundary is found.
+    """
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(content.strip()) if s]
+    if len(sentences) <= 1:
+        return [(start, end, content)]
+
+    total_chars = sum(len(sentence) for sentence in sentences)
+    duration = end - start
+
+    entries: list[tuple[timedelta, timedelta, str]] = []
+    cursor = start
+    for i, sentence in enumerate(sentences):
+        if i == len(sentences) - 1:
+            sentence_end = end
+        else:
+            sentence_end = cursor + duration * (len(sentence) / total_chars)
+        entries.append((cursor, sentence_end, sentence))
+        cursor = sentence_end
+    return entries
 
 
 def build_srt_filename(
