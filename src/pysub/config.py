@@ -48,6 +48,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
     server: str
     whisper_model: str
     tmp_dir: str | None = None
+    min_subtitle_duration_seconds: float = 1.5
 
     @classmethod
     def from_args(cls, args: argparse.Namespace, tmp_dir: str | None = None) -> Config:
@@ -64,4 +65,5 @@ class Config:  # pylint: disable=too-many-instance-attributes
             server=args.server,
             whisper_model=args.whisper_model,
             tmp_dir=tmp_dir,
+            min_subtitle_duration_seconds=args.min_subtitle_duration,
         )

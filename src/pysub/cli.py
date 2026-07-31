@@ -94,6 +94,14 @@ def parse_args() -> configargparse.Namespace:
         default="large-v2",
     )
     p.add_argument(
+        "--min_subtitle_duration",
+        help="Minimum time (in seconds) a subtitle stays on screen; "
+        "end times are padded to meet this without overlapping the next subtitle "
+        "(default: %(default)s)",
+        type=float,
+        default=1.5,
+    )
+    p.add_argument(
         "-log",
         "--loglevel",
         help="Provide logging level. Example --loglevel debug",

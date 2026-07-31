@@ -31,6 +31,34 @@ def format_vtt_timestamp(delta: timedelta) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
 
+def pad_subtitle_durations(
+    entries: list[tuple[timedelta, timedelta, str]],
+    min_duration: timedelta,
+) -> list[tuple[timedelta, timedelta, str]]:
+    """Extend subtitle end times so each one stays on screen for a minimum duration.
+
+    Padding never pushes an end time past the next subtitle's start, so
+    subtitles never end up overlapping as a side effect of padding.
+
+    Args:
+        entries: List of (start, end, content) tuples, in display order.
+        min_duration: Minimum amount of time a subtitle should remain visible.
+
+    Returns:
+        A new list of (start, end, content) tuples with end times padded.
+    """
+    padded = list(entries)
+    for i, (start, end, content) in enumerate(padded):
+        if end - start >= min_duration:
+            continue
+        desired_end = start + min_duration
+        if i + 1 < len(padded):
+            desired_end = min(desired_end, padded[i + 1][0])
+        if desired_end > end:
+            padded[i] = (start, desired_end, content)
+    return padded
+
+
 def build_srt_filename(
     subtitle_template: str,
     subtitle_type: SubtitleType,

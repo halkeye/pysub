@@ -2,7 +2,6 @@
 
 import logging
 from datetime import timedelta
-from typing import Optional
 
 import srt
 import webvtt
@@ -16,7 +15,11 @@ from pysub.config import (
     TranslationProvider,
 )
 from pysub.language import get_language_name
-from pysub.subtitles import build_srt_filename, format_vtt_timestamp
+from pysub.subtitles import (
+    build_srt_filename,
+    format_vtt_timestamp,
+    pad_subtitle_durations,
+)
 from pysub.transcription import transcribe
 from pysub.transcription.qwen import transcribe_qwen
 from pysub.translation import translate_text
@@ -39,11 +42,7 @@ def process_single_video(
     target_language = config.target_language
     subtitle_type = config.subtitle_type
 
-    subtitles: list[srt.Subtitle] = []
-
-    vtt: Optional[webvtt.WebVTT] = None
-    if subtitle_type == SubtitleType.VTT:
-        vtt = webvtt.WebVTT()
+    subtitles: list[tuple[timedelta, timedelta, str]] = []
 
     logger.info("Starting to read audio file")
 
@@ -102,36 +101,35 @@ def process_single_video(
                 original_content,
                 content,
             )
-            if subtitle_type == SubtitleType.SRT:
-                subtitles.append(
-                    srt.Subtitle(
-                        index=len(subtitles) + 1,
-                        start=start,
-                        end=end,
-                        content=content.replace("\n", "\\n"),
-                    )
-                )
-            elif subtitle_type == SubtitleType.VTT:
-                if vtt is None:
-                    raise ValueError(
-                        "VTT object is not initialized for VTT subtitle type"
-                    )
+            subtitles.append((start, end, content))
 
-                vtt.captions.append(
-                    webvtt.Caption(
-                        start=format_vtt_timestamp(start),
-                        end=format_vtt_timestamp(end),
-                        text=content.split("\n"),
-                    )
-                )
+    subtitles = pad_subtitle_durations(
+        subtitles, timedelta(seconds=config.min_subtitle_duration_seconds)
+    )
 
     if subtitle_path is not None:
         if subtitle_type == SubtitleType.SRT:
+            srt_subtitles = [
+                srt.Subtitle(
+                    index=index,
+                    start=start,
+                    end=end,
+                    content=content.replace("\n", "\\n"),
+                )
+                for index, (start, end, content) in enumerate(subtitles, start=1)
+            ]
             with open(file=subtitle_path, mode="w", encoding="utf-8") as subtitle_file:
-                subtitle_file.write(srt.compose(subtitles))
+                subtitle_file.write(srt.compose(srt_subtitles))
         elif subtitle_type == SubtitleType.VTT:
-            if vtt is None:
-                raise ValueError("VTT object is not initialized for VTT subtitle type")
+            vtt = webvtt.WebVTT()
+            vtt.captions.extend(
+                webvtt.Caption(
+                    start=format_vtt_timestamp(start),
+                    end=format_vtt_timestamp(end),
+                    text=content.split("\n"),
+                )
+                for start, end, content in subtitles
+            )
             vtt.save(subtitle_path)
 
     logger.info("Subtitles saved to: %s", subtitle_path)
