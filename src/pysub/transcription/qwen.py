@@ -1,8 +1,8 @@
-"""Qwen3 transcription provider (Work in Progress)."""
+"""Qwen3 transcription provider."""
 
 import logging
 import os
-from typing import Any, ClassVar, Iterator
+from typing import Any, ClassVar, Iterator, Optional
 
 import torch
 from pydub import AudioSegment
@@ -13,6 +13,7 @@ from transformers import (
 )
 from transformers.models.qwen3_asr.processing_qwen3_asr import (
     FORCED_ALIGNER_LANGUAGES,
+    resolve_language,
 )
 
 from pysub.transcription.types import TranscriptionInfo, TranscriptionSegment
@@ -209,6 +210,7 @@ def _words_to_sentences(
 
 def transcribe_qwen(
     audio_path: str,
+    source_language: Optional[str] = None,
 ) -> tuple[Iterator[TranscriptionSegment], TranscriptionInfo]:
     """Transcribe audio using Qwen3 ASR model.
 
@@ -236,7 +238,8 @@ def transcribe_qwen(
     # Parsed output: dict with "language" and "transcription"
     parsed = asr.processor.decode(generated_ids, return_format="parsed")[0]
 
-    language = parsed["language"]
+    language = resolve_language(source_language or parsed["language"])
+    assert language is not None
     transcript = parsed["transcription"]
 
     logger.debug("Detected language: %s", language)

@@ -15,7 +15,7 @@ from pysub.config import (
     TranscriptionProvider,
     TranslationProvider,
 )
-from pysub.language import get_language_name
+from pysub.language import get_language_code, get_language_name
 from pysub.subtitles import (
     build_srt_filename,
     format_vtt_timestamp,
@@ -48,9 +48,13 @@ def process_single_video(
 
     logger.info("Starting to read audio file")
 
-    audio_path = extract_audio(
-        video_path, audio_path=os.path.join(config.tmp_dir or "./", "temp_audio.mp3")
-    )
+    if os.path.splitext(video_path)[1].lower() == ".mp3":
+        audio_path = video_path
+    else:
+        audio_path = extract_audio(
+            video_path,
+            audio_path=os.path.join(config.tmp_dir or "./", "temp_audio.mp3"),
+        )
     chunks = chunk_audio(config, audio_path)
 
     logger.info("Transcribing audio file")
@@ -60,18 +64,22 @@ def process_single_video(
     for chunk in tqdm(chunks, desc="Chunks", unit="chunk", position=1):
         if config.transcription == TranscriptionProvider.WHISPER:
             segments, info = transcribe(chunk.filename, config, source_language)
-
-            if source_language is None:
-                source_language = get_language_name(info.language)
-
         elif config.transcription == TranscriptionProvider.QWEN3:
-            segments, info = transcribe_qwen(chunk.filename)
-            if source_language is None:
-                source_language = get_language_name(info.language)
+            segments, info = transcribe_qwen(
+                chunk.filename, get_language_code(source_language)
+            )
         else:
             raise ValueError(
                 f"Unsupported transcription provider: {config.transcription}"
             )
+
+        if source_language is None:
+            if info.language is not None:
+                source_language = get_language_name(info.language)
+            else:
+                raise ValueError(
+                    "unable to determine source language so it needs to be provided"
+                )
 
         if subtitle_path is None:
             subtitle_path = build_srt_filename(

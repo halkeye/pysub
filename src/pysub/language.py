@@ -22,7 +22,7 @@ def get_language_code(language_name: str) -> str:
         return lang.alpha_2 if hasattr(lang, "alpha_2") else lang.alpha_3
     except LookupError:
         logger.warning("Language code not found for: %s", language_name)
-        return "Language not found"
+        return language_name
 
 
 def get_language_name(code: str) -> str:
@@ -45,4 +45,4 @@ def get_language_name(code: str) -> str:
         return lang.name.lower()
     except LookupError:
         logger.warning("Language name not found for code: %s", code)
-        return "Language not found"
+        return code

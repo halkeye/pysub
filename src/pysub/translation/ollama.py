@@ -1,6 +1,7 @@
 """Ollama translation provider."""
 
 import logging
+from difflib import SequenceMatcher
 from string import Template
 
 import requests
@@ -8,6 +9,19 @@ import requests
 from pysub.language import get_language_code
 
 logger = logging.getLogger(__name__)
+
+_ECHO_SIMILARITY_THRESHOLD = 0.9
+
+
+def _looks_like_echo(original: str, translated: str) -> bool:
+    """Check whether translated text is suspiciously close to the untranslated original.
+
+    Small local models sometimes fail to translate and just echo the source
+    text back instead. This catches that failure mode via string similarity;
+    it won't catch a model that translates incorrectly rather than not at all.
+    """
+    ratio = SequenceMatcher(None, original.casefold(), translated.casefold()).ratio()
+    return ratio >= _ECHO_SIMILARITY_THRESHOLD
 
 DEFAULT_PROMPT = (
     "You are a professional $SOURCE_LANG ($SOURCE_CODE) to $TARGET_LANG ($TARGET_CODE) translator.\n"
@@ -39,6 +53,7 @@ def translate_with_ollama(
     model: str | None = None,
     server: str = "http://localhost:11434",
     prompt: str | None = None,
+    max_attempts: int = 2,
 ) -> str:
     """Translate text using Ollama's local LLM API.
 
@@ -49,6 +64,7 @@ def translate_with_ollama(
         model: The Ollama model to use for translation.
         server: Ollama server URL.
         prompt: Custom prompt template (optional).
+        max_attempts: Retries if the model echoes the source text back untranslated.
 
     Returns:
         Translated text.
@@ -80,16 +96,38 @@ def translate_with_ollama(
         }
     )
 
-    body = {"model": model, "prompt": resolved_prompt, "stream": False}
+    result = text
+    for attempt in range(1, max_attempts + 1):
+        attempt_prompt = resolved_prompt
+        if attempt > 1:
+            attempt_prompt = (
+                f"Your previous response was not translated — it matched the "
+                f"original {source_language} text almost exactly. You MUST output "
+                f"{target_language} this time.\n\n"
+            ) + resolved_prompt
 
-    response = requests.post(
-        f"{server}/api/generate",
-        json=body,
-        timeout=120,
-    )
+        response = requests.post(
+            f"{server}/api/generate",
+            json={"model": model, "prompt": attempt_prompt, "stream": False},
+            timeout=120,
+        )
+        response.raise_for_status()
 
-    response.raise_for_status()
+        result = response.json()["response"].strip().strip('"')
 
-    result = response.json()["response"].strip().strip('"')
+        if not _looks_like_echo(text, result):
+            break
+
+        logger.warning(
+            "Ollama translation attempt %d/%d looks untranslated (echoed %s text); retrying",
+            attempt,
+            max_attempts,
+            source_language,
+        )
+    else:
+        logger.warning(
+            "Ollama translation still looks untranslated after %d attempts", max_attempts
+        )
+
     logger.debug("Ollama translation result: %s", result[:50] if result else "")
     return result

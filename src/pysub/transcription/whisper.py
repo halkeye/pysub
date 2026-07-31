@@ -31,7 +31,7 @@ def transcribe_whisper(
     """
     logger.info("Loading Whisper model: %s", config.whisper_model)
 
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.debug("Using device: %s", device)
 
     whisper_model = WhisperModel(
