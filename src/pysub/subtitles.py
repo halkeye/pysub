@@ -16,12 +16,24 @@ logger = logging.getLogger(__name__)
 # question mark (؟). Arabic reuses the Latin "." and "!".
 _SENTENCE_END_CHARS = ".!?。！？।॥؟"
 
-# Split right after a sentence-ending mark, consuming any trailing whitespace
-# (CJK has none). The negative lookahead keeps clustered marks like "..." or
-# "?!" together by refusing to split when another sentence-ending mark
-# follows (possibly after whitespace).
+# Closing quotes/brackets that can trail a sentence-ending mark (e.g. the
+# period in 'She said "Onii-chan."'). The real boundary is after these
+# closers, not before them.
+_CLOSER_CHARS = "\"')\\]}”’›»"
+
+# Split right after a sentence-ending mark (and any closing quotes/brackets
+# that follow it), consuming trailing whitespace (CJK has none). The first
+# negative lookahead refuses to split before a closer, so the boundary lands
+# after it instead of inside the quoted/parenthetical text. The second
+# negative lookahead keeps clustered marks like "..." or "?!" together by
+# refusing to split when another sentence-ending mark follows.
 _SENTENCE_SPLIT_RE = re.compile(
-    rf"(?<=[{_SENTENCE_END_CHARS}])(?!\s*[{_SENTENCE_END_CHARS}])\s*"
+    rf"(?:(?<=[{_SENTENCE_END_CHARS}])"
+    rf"|(?<=[{_SENTENCE_END_CHARS}][{_CLOSER_CHARS}])"
+    rf"|(?<=[{_SENTENCE_END_CHARS}][{_CLOSER_CHARS}][{_CLOSER_CHARS}]))"
+    rf"(?![{_CLOSER_CHARS}])"
+    rf"(?!\s*[{_SENTENCE_END_CHARS}])"
+    r"\s*"
 )
 
 
